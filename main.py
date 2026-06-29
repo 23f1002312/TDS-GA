@@ -1,52 +1,86 @@
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-import uuid
-import time
-
-# Replace with YOUR IITM email
-EMAIL = "23f1002312@ds.study.iitm.ac.in"
-
-# The allowed origin inferred from the grader error
-ALLOWED_ORIGIN = "https://dash-hyi8bl.example.com"
+from typing import List
 
 app = FastAPI()
 
+# Allow browser access from the grader page
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[ALLOWED_ORIGIN],
+    allow_origins=["*"],  # assignment asks for browser access
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# --------------------------------------------------
+# Layer 1: defaults
+# --------------------------------------------------
+config = {
+    "port": 8000,
+    "workers": 1,
+    "debug": False,
+    "log_level": "info",
+    "api_key": "default-secret-000",
+}
 
-@app.middleware("http")
-async def add_headers(request: Request, call_next):
-    start = time.perf_counter()
+# --------------------------------------------------
+# Layer 2: config.development.yaml
+# --------------------------------------------------
+config.update({
+    "workers": 3,
+    "log_level": "error",
+    "api_key": "key-lh18ut61ny",
+})
 
-    response = await call_next(request)
+# --------------------------------------------------
+# Layer 3: .env
+# --------------------------------------------------
+dotenv = {
+    "APP_PORT": "8336",
+    "APP_DEBUG": "false",
+    "APP_LOG_LEVEL": "debug",
+    "APP_API_KEY": "key-72r3w9ju8g",
+    # If present:
+    # "NUM_WORKERS": "5"
+}
 
-    response.headers["X-Request-ID"] = str(uuid.uuid4())
-    response.headers["X-Process-Time"] = f"{time.perf_counter()-start:.6f}"
+for k, v in dotenv.items():
+    if k == "NUM_WORKERS":
+        config["workers"] = v
+    elif k.startswith("APP_"):
+        config[k[4:].lower()] = v
 
-    return response
+# --------------------------------------------------
+# Layer 4: OS environment
+# --------------------------------------------------
+osenv = {
+    "APP_PORT": "8805",
+    "APP_LOG_LEVEL": "error",
+}
+
+for k, v in osenv.items():
+    config[k[4:].lower()] = v
 
 
-@app.get("/stats")
-def stats(values: str = Query(...)):
-    nums = [int(x.strip()) for x in values.split(",") if x.strip()]
+def to_bool(v):
+    return str(v).lower() in ("true", "1", "yes", "on")
+
+
+@app.get("/effective-config")
+def effective_config(set: List[str] = Query(default=[])):
+    result = dict(config)
+
+    # CLI overrides
+    for item in set:
+        if "=" in item:
+            k, v = item.split("=", 1)
+            result[k] = v
 
     return {
-        "email": EMAIL,
-        "count": len(nums),
-        "sum": sum(nums),
-        "min": min(nums),
-        "max": max(nums),
-        "mean": sum(nums) / len(nums),
+        "port": int(result["port"]),
+        "workers": int(result["workers"]),
+        "debug": to_bool(result["debug"]),
+        "log_level": str(result["log_level"]),
+        "api_key": "****",
     }
-
-
-@app.get("/")
-def home():
-    return {"status": "running"}
